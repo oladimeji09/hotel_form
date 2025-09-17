@@ -2,6 +2,9 @@
 __pycache__/
 *.py[codz]
 *$py.class
+hotel_worker/
+screts.toml
+.streamlit/secrets.toml
 
 # C extensions
 *.so
