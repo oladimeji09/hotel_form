@@ -6,7 +6,7 @@ import streamlit as st
 import json
 import requests
 import os
-from pydantic import BaseModel, EmailStr, validator
+from pydantic import BaseModel, EmailStr, field_validator
 from supabase import create_client, Client
 
 # Must be first Streamlit command
@@ -43,21 +43,27 @@ class Submission(BaseModel):
     check_out: date
     hotel_brands: List[str]
 
-    @validator("destination", allow_reuse=True)
+
+    @field_validator("destination")
+    @classmethod
     def dest_nonempty(cls, v):
         v = v.strip()
         if not v:
             raise ValueError("Destination is required.")
         return v.title()
 
-    @validator("check_out", allow_reuse=True)
+
+    @field_validator("check_out")
+    @classmethod
     def dates_valid(cls, v, values):
-        check_in = values.get("check_in")
+        check_in = values.data.get("check_in") if hasattr(values, 'data') else values.get("check_in")
         if check_in and v <= check_in:
             raise ValueError("Check-out must be after check-in.")
         return v
 
-    @validator("hotel_brands", allow_reuse=True)
+
+    @field_validator("hotel_brands")
+    @classmethod
     def brands_valid(cls, v):
         if not v:
             raise ValueError("Select at least one hotel brand.")
