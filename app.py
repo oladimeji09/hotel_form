@@ -1,59 +1,30 @@
+
 import uuid
 from datetime import datetime, date
 from typing import List, Optional
 import streamlit as st
+import json
+import requests
+import os
+from pydantic import BaseModel, EmailStr, validator
+from supabase import create_client, Client
+
 # Must be first Streamlit command
 st.set_page_config(page_title="Hotel Request Intake", page_icon="🏨", layout="centered")
 
-from pydantic import BaseModel, EmailStr, validator
-from sqlalchemy import (
-    create_engine, text
-)
-import json
-import requests
 
 # ---------------------------
 # Config / Secrets
 # ---------------------------
-# Load configuration from .streamlit/secrets.toml
-DB_URI = st.secrets["db"]["uri"]
-WEBHOOK_URL = st.secrets.get("WEBHOOK_URL", "")
+# Load configuration from environment variables
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "")
 
-engine = create_engine(DB_URI, pool_pre_ping=True, future=True)
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# ---------------------------
-# One-time table creation
-# ---------------------------
-DDL = """
-CREATE SCHEMA IF NOT EXISTS hotel_scans;
 
-CREATE TABLE IF NOT EXISTS hotel_scans.hotel_requests (
-    id UUID PRIMARY KEY,
-    created_ts TIMESTAMPTZ NOT NULL,
-    destination_text TEXT NOT NULL,
-    requester_email TEXT NOT NULL,
-    nickname TEXT,
-    check_in_date DATE NOT NULL,
-    check_out_date DATE NOT NULL,
-    hotel_brands_json JSONB NOT NULL,
-    source TEXT NOT NULL DEFAULT 'streamlit',
-    submission_ip TEXT,
-    ua_hash TEXT,
-    processed BOOLEAN DEFAULT FALSE,
-    workbook_url TEXT,
-    workbook_id TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_hotel_requests_check_in ON hotel_scans.hotel_requests (check_in_date);
-CREATE INDEX IF NOT EXISTS idx_hotel_requests_destination ON hotel_scans.hotel_requests (destination_text);
-CREATE INDEX IF NOT EXISTS idx_hotel_requests_email ON hotel_scans.hotel_requests (requester_email);
-"""
-
-try:
-    with engine.begin() as conn:
-        for stmt in [s.strip() for s in DDL.split(";") if s.strip()]:
-            conn.execute(text(stmt))
-except Exception as e:
-    st.sidebar.error(f"Database error: {str(e)[:100]}")
+# (Supabase manages the table schema. No need for local DDL or engine setup.)
 
 # ---------------------------
 # Validation model
@@ -138,34 +109,31 @@ if submitted:
     request_id = str(uuid.uuid4())
     hotel_brands_json = json.dumps(data.hotel_brands)
 
-    # Insert into DB (transaction)
-    INSERT_SQL = text("""
-        INSERT INTO hotel_scans.hotel_requests (
-            id, created_ts, destination_text, requester_email, nickname,
-            check_in_date, check_out_date, hotel_brands_json, source, submission_ip, ua_hash
-        ) VALUES (
-            :id, :created_ts, :destination_text, :requester_email, NULL,
-            :check_in_date, :check_out_date, CAST(:hotel_brands_json AS JSONB), :source, NULL, NULL
-        )
-    """)
+    # Prepare data for Supabase
+    supabase_payload = {
+        "id": request_id,
+        "created_ts": created_ts.isoformat(),
+        "destination_text": data.destination,
+        "requester_email": str(data.email),
+        "nickname": None,
+        "check_in_date": str(data.check_in),
+        "check_out_date": str(data.check_out),
+        "hotel_brands_json": hotel_brands_json,
+        "source": "streamlit",
+        "submission_ip": None,
+        "ua_hash": None,
+        "processed": False,
+        "workbook_url": None,
+        "workbook_id": None,
+    }
 
     try:
-        with engine.begin() as conn:
-            conn.execute(
-                INSERT_SQL,
-                {
-                    "id": request_id,
-                    "created_ts": created_ts,
-                    "destination_text": data.destination,
-                    "requester_email": str(data.email),
-                    "check_in_date": data.check_in,
-                    "check_out_date": data.check_out,
-                    "hotel_brands_json": hotel_brands_json,
-                    "source": "streamlit",
-                },
-            )
+        response = supabase.table("hotel_requests").insert(supabase_payload).execute()
+        if hasattr(response, "status_code") and response.status_code >= 300:
+            st.sidebar.error(f"Supabase error: {getattr(response, 'data', response)}")
+            st.stop()
     except Exception as e:
-        st.sidebar.error(f"Database error: {str(e)}")
+        st.sidebar.error(f"Supabase error: {e}")
         st.stop()
 
     # Trigger event (optional)
@@ -214,3 +182,4 @@ if submitted:
     #         "check_out": str(data.check_out),
     #         "hotel_brands": data.hotel_brands,
     #     })
+
