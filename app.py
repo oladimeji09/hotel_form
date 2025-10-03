@@ -338,6 +338,7 @@ if req_id:
                 position: relative;
                 border: 1px solid #444;
                 border-radius: 8px;
+                -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
             }
             .hotel-table {
                 border-collapse: collapse;
@@ -415,6 +416,45 @@ if req_id:
             .hotel-table td:nth-child(5) {
                 font-weight: 600;
                 color: #ff6b6b; /* Discount in red (bright for dark bg) */
+            }
+            
+            /* Mobile-responsive styles */
+            @media screen and (max-width: 768px) {
+                .table-wrapper {
+                    max-height: 500px;
+                    border-radius: 4px;
+                }
+                .hotel-table th,
+                .hotel-table td {
+                    padding: 8px 10px;
+                    font-size: 11px;
+                }
+                .hotel-table th:first-child,
+                .hotel-table td:first-child {
+                    min-width: 150px; /* Smaller hotel name column on mobile */
+                }
+                .hotel-table a {
+                    padding: 5px 10px;
+                    font-size: 11px;
+                }
+                /* Make sure frozen columns work on mobile */
+                .hotel-table th:first-child,
+                .hotel-table td:first-child {
+                    box-shadow: 2px 0 5px rgba(0, 0, 0, 0.3); /* Add shadow for depth */
+                }
+            }
+            
+            /* Very small screens - stack info differently */
+            @media screen and (max-width: 480px) {
+                .hotel-table th,
+                .hotel-table td {
+                    padding: 6px 8px;
+                    font-size: 10px;
+                }
+                .hotel-table th:first-child,
+                .hotel-table td:first-child {
+                    min-width: 120px;
+                }
             }
             </style>
             """, unsafe_allow_html=True)
