@@ -187,11 +187,11 @@ if req_id:
             # Only show the specified columns, fill missing columns with empty/default values
             # Reorder columns: name, hotel brand, distance, price, discount, retail price, rating, reviews, booking link, currency
             show_cols = [
-                "name", "hotel_brand", "distance", "price", "discount_pct", "retail_price", "rating", "reviews", "booking_url", "currency"
+                "name", "hotel_brand", "distance", "price", "discount_pct", "retail_price", "rating_float", "reviews", "booking_url", "currency"
             ]
             for col in show_cols:
                 if col not in df.columns:
-                    df[col] = "" if col not in ["price", "discount_pct", "retail_price", "distance", "reviews", "rating"] else 0
+                    df[col] = "" if col not in ["price", "discount_pct", "retail_price", "distance", "reviews", "rating_float"] else 0
             
             # Select only the columns we want
             df = df[show_cols]
@@ -239,9 +239,10 @@ if req_id:
                 except:
                     return "☆☆☆☆☆"
             
-            df["rating"] = df["rating"].apply(rating_to_stars)
-            # Store numeric rating separately for filtering/sorting
-            df["rating_value"] = pd.to_numeric(df["rating"].apply(lambda x: float(str(x).replace('⭐','1').replace('✨','0.5').replace('☆','0')[:3]) if isinstance(x, str) else 0), errors="coerce").fillna(0)
+            # Store numeric rating for filtering/sorting BEFORE converting to stars
+            df["rating_value"] = pd.to_numeric(df["rating_float"], errors="coerce").fillna(0)
+            # Convert rating_float to stars for display and rename to 'rating'
+            df["rating"] = df["rating_float"].apply(rating_to_stars)
             
             # Store numeric versions BEFORE renaming columns
             df["price_numeric"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
@@ -250,6 +251,12 @@ if req_id:
             df["discount_numeric"] = pd.to_numeric(df["discount_pct"], errors="coerce").fillna(0)
             df["reviews_numeric"] = pd.to_numeric(df["reviews"], errors="coerce").fillna(0)
             df["retail_price_numeric"] = pd.to_numeric(df["retail_price"], errors="coerce").fillna(0)
+            
+            # Add % sign to discount values
+            df["discount_pct"] = df["discount_pct"].apply(lambda x: f"{x}%" if pd.notna(x) and x != 0 else "0%")
+            
+            # Drop rating_float since we now have rating column
+            df = df.drop(columns=["rating_float"])
             
             # NOW rename columns for display (do this LAST)
             df = df.rename(columns={
@@ -347,7 +354,7 @@ if req_id:
             st.markdown("""
             <style>
             .table-wrapper {
-                max-height: 600px;
+                max-height: 900px;
                 overflow: auto;
                 position: relative;
                 border: 1px solid #444;
@@ -367,37 +374,46 @@ if req_id:
                 border-bottom: 2px solid #444;
             }
             .hotel-table th {
-                padding: 12px 15px;
-                text-align: left;
-                font-weight: 600;
+                padding: 3px 10px;
+                text-align: center;
+                font-weight: 300;
                 text-transform: uppercase;
-                font-size: 12px;
-                letter-spacing: 0.5px;
+                font-size: 10px;
+                letter-spacing: 0.3px;
                 color: #fff;
                 background: #222;
                 position: sticky;
                 top: 0;
-                z-index: 10;
+                z-index: 4;
             }
-            /* Freeze first column (name) */
+            /* Freeze first column (name) - sticky positioning */
             .hotel-table th:first-child,
             .hotel-table td:first-child {
                 position: sticky;
                 left: 0;
                 z-index: 5;
                 background: #111;
+                font-weight: 600;
+                width: 100px; /* Fixed narrow width so other columns are visible */
+                min-width: 100px;
+                max-width: 100px;
+                white-space: normal; /* Allow text wrapping in name column */
+                word-break: break-word;
+                overflow-wrap: break-word;
             }
             .hotel-table th:first-child {
-                z-index: 15;
                 background: #222;
+                z-index: 15;
             }
             .hotel-table td {
-                padding: 12px 15px;
+                padding: 6px 8px;
                 border-bottom: 1px solid #222;
                 vertical-align: middle;
+                text-align: center;
                 color: #fff;
                 background-color: #111;
                 white-space: nowrap;
+                font-size: 12px;
             }
             .hotel-table tr:last-child td {
                 border-bottom: none;
@@ -407,28 +423,25 @@ if req_id:
             }
             .hotel-table a {
                 display: inline-block;
-                padding: 6px 12px;
+                padding: 4px 8px;
                 color: white;
                 text-decoration: none;
                 border-radius: 4px;
                 font-weight: 500;
                 transition: all 0.2s ease;
+                font-size: 12px;
             }
             .hotel-table a:hover {
                 opacity: 0.9;
                 box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
             }
             /* Add specific styling for important columns */
-            .hotel-table td:first-child {
-                font-weight: 600; /* Hotel name - first column */
-                min-width: 40px;
-            }
             .hotel-table td:nth-child(4) {
                 font-weight: 700;
                 color: #47ffb2; /* Price in green (bright for dark bg) */
             }
             .hotel-table td:nth-child(5) {
-                font-weight: 600;
+                font-weight: 300;
                 color: #ff6b6b; /* Discount in red (bright for dark bg) */
             }
             
@@ -445,7 +458,9 @@ if req_id:
                 }
                 .hotel-table th:first-child,
                 .hotel-table td:first-child {
-                    min-width: 20px; /* Even smaller hotel name column on mobile */
+                    width: 80px !important; /* Smaller on mobile */
+                    min-width: 80px !important;
+                    max-width: 80px !important;
                 }
                 .hotel-table a {
                     padding: 5px 10px;
@@ -467,7 +482,9 @@ if req_id:
                 }
                 .hotel-table th:first-child,
                 .hotel-table td:first-child {
-                    min-width: 40px;
+                    width: 70px !important;
+                    min-width: 70px !important;
+                    max-width: 70px !important;
                 }
             }
             </style>
