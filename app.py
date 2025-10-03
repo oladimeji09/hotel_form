@@ -1,11 +1,4 @@
 from urllib.parse import urlencode
-# Helper to get request_id from URL query params
-def get_request_id_from_url():
-    query_params = st.query_params if hasattr(st, 'query_params') else st.experimental_get_query_params()
-    req_id = query_params.get("request_id")
-    if isinstance(req_id, list):
-        req_id = req_id[0]
-    return req_id
 from dotenv import load_dotenv
 
 import uuid
@@ -18,10 +11,31 @@ import os
 from pydantic import BaseModel, EmailStr, field_validator
 from supabase import create_client, Client
 
-# Must be first Streamlit command
-# Must be first Streamlit command
+# Must be first - load env before using streamlit
 load_dotenv()
-st.set_page_config(page_title="Hotel Request Intake", page_icon="🏨", layout="centered")
+
+# Check if we're on the results page BEFORE setting page config
+# This must happen before any other Streamlit command
+query_params = st.query_params if hasattr(st, 'query_params') else st.experimental_get_query_params()
+req_id_from_url = query_params.get("request_id")
+if isinstance(req_id_from_url, list):
+    req_id_from_url = req_id_from_url[0]
+
+# Set page config based on whether we're showing results or form
+if req_id_from_url:
+    # Results page - use wide layout
+    st.set_page_config(page_title="Hotel Results", page_icon="🏨", layout="wide")
+else:
+    # Form page - use centered layout
+    st.set_page_config(page_title="Hotel Request Intake", page_icon="🏨", layout="centered")
+
+# Helper to get request_id from URL query params
+def get_request_id_from_url():
+    query_params = st.query_params if hasattr(st, 'query_params') else st.experimental_get_query_params()
+    req_id = query_params.get("request_id")
+    if isinstance(req_id, list):
+        req_id = req_id[0]
+    return req_id
 
 
 # ---------------------------
@@ -407,7 +421,7 @@ if req_id:
             /* Add specific styling for important columns */
             .hotel-table td:first-child {
                 font-weight: 600; /* Hotel name - first column */
-                min-width: 200px;
+                min-width: 40px;
             }
             .hotel-table td:nth-child(4) {
                 font-weight: 700;
@@ -431,7 +445,7 @@ if req_id:
                 }
                 .hotel-table th:first-child,
                 .hotel-table td:first-child {
-                    min-width: 150px; /* Smaller hotel name column on mobile */
+                    min-width: 20px; /* Even smaller hotel name column on mobile */
                 }
                 .hotel-table a {
                     padding: 5px 10px;
@@ -453,7 +467,7 @@ if req_id:
                 }
                 .hotel-table th:first-child,
                 .hotel-table td:first-child {
-                    min-width: 120px;
+                    min-width: 40px;
                 }
             }
             </style>
