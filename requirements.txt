@@ -6,4 +6,5 @@ pydantic>=2.7
 python-dotenv>=1.0
 supabase>=2.6.0
 pydantic[email]
-streamlit-aggrid
+pandas>=2.0.0
+numpy>=1.24.0 

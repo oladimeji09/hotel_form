@@ -169,18 +169,20 @@ if req_id:
         vw_response = supabase.table("vw_top_results").select("*").eq("request_id", req_id).execute()
         if hasattr(vw_response, "data") and vw_response.data:
             import pandas as pd
-            from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
             df = pd.DataFrame(vw_response.data)
             # Only show the specified columns, fill missing columns with empty/default values
+            # Reorder columns: name, hotel brand, distance, price, discount, retail price, rating, reviews, booking link, currency
             show_cols = [
-                "rank", "name", "distance", "reviews", "rating", "price", "discount_pct", "retail_price", "booking_url", "hotel_brand", "currency"
+                "name", "hotel_brand", "distance", "price", "discount_pct", "retail_price", "rating", "reviews", "booking_url", "currency"
             ]
             for col in show_cols:
                 if col not in df.columns:
-                    df[col] = "" if col not in ["price", "discount_pct", "retail_price", "distance", "reviews", "rank", "rating"] else 0
+                    df[col] = "" if col not in ["price", "discount_pct", "retail_price", "distance", "reviews", "rating"] else 0
+            
+            # Select only the columns we want
             df = df[show_cols]
-
-            # Add icons for hotel_brand and booking_url
+            
+            # Add icons for hotel_brand and booking_url BEFORE renaming
             brand_icons = {
                 "Marriott": "🏨",
                 "IHG": "🌐",
@@ -196,12 +198,10 @@ if req_id:
                 "Hyatt": "#7D2248"      # Hyatt burgundy
             }
             
-            def brand_icon(brand):
-                return brand_icons.get(brand, "🏨") + " " + str(brand)
+            # Don't add emojis, just keep the brand name
+            # df["hotel_brand"] is already the brand name, no transformation needed
             
-            df["hotel_brand"] = df["hotel_brand"].apply(brand_icon)
-            
-            # Store original brand for button color
+            # Store original brand for button color (before renaming)
             df["brand_key"] = df["hotel_brand"].apply(lambda x: next((k for k in brand_icons.keys() if k in x), "default"))
 
             def booking_link(row):
@@ -210,48 +210,141 @@ if req_id:
                 color = brand_colors.get(brand, "#3a7bd5")  # Default blue if brand not found
                 return f'<a href="{url}" target="_blank" style="background-color: {color};">🔗 Book</a>' if url else ""
             
-            # Apply the function row-wise to get colored buttons based on brand
+            # Apply the function row-wise to get colored buttons based on brand (before renaming)
             df["booking_url"] = df.apply(booking_link, axis=1)
+            
+            # Convert rating to stars (without numeric display)
+            def rating_to_stars(rating):
+                try:
+                    rating_float = float(rating)
+                    full_stars = int(rating_float)
+                    half_star = 1 if (rating_float - full_stars) >= 0.5 else 0
+                    empty_stars = 5 - full_stars - half_star
+                    stars = "⭐" * full_stars + ("✨" if half_star else "") + "☆" * empty_stars
+                    return stars
+                except:
+                    return "☆☆☆☆☆"
+            
+            df["rating"] = df["rating"].apply(rating_to_stars)
+            # Store numeric rating separately for filtering/sorting
+            df["rating_value"] = pd.to_numeric(df["rating"].apply(lambda x: float(str(x).replace('⭐','1').replace('✨','0.5').replace('☆','0')[:3]) if isinstance(x, str) else 0), errors="coerce").fillna(0)
+            
+            # Store numeric versions BEFORE renaming columns
+            df["price_numeric"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
+            # Parse distance: extract numeric value from strings like "0.5 miles" or "1.2 km"
+            df["distance_numeric"] = df["distance"].apply(lambda x: float(str(x).split()[0]) if isinstance(x, str) and str(x).split()[0].replace('.','',1).isdigit() else 0)
+            df["discount_numeric"] = pd.to_numeric(df["discount_pct"], errors="coerce").fillna(0)
+            df["reviews_numeric"] = pd.to_numeric(df["reviews"], errors="coerce").fillna(0)
+            df["retail_price_numeric"] = pd.to_numeric(df["retail_price"], errors="coerce").fillna(0)
+            
+            # NOW rename columns for display (do this LAST)
+            df = df.rename(columns={
+                "hotel_brand": "hotel brand",
+                "discount_pct": "discount",
+                "retail_price": "retail price",
+                "booking_url": "booking link"
+            })
 
-            # Filtering options
-            brands = sorted(set(df["hotel_brand"]))
+            # Filtering options (moved to top)
+            st.write("### 🔍 Filter Options")
+            brands = sorted(set(df["hotel brand"]))
             selected_brands = st.multiselect("Filter by Brand", brands, default=brands)
-            filtered_df = df[df["hotel_brand"].isin(selected_brands)].copy()
-            # Ensure numeric columns for filtering
-            for col in ["price", "distance", "discount_pct", "reviews"]:
-                filtered_df[col] = pd.to_numeric(filtered_df[col], errors="coerce").fillna(0)
+            filtered_df = df[df["hotel brand"].isin(selected_brands)].copy()
+            
             # Price filter
-            min_price, max_price = int(filtered_df["price"].min()), int(filtered_df["price"].max()) if not filtered_df.empty else (0, 0)
+            min_price, max_price = int(filtered_df["price_numeric"].min()), int(filtered_df["price_numeric"].max()) if not filtered_df.empty else (0, 0)
             price_range = st.slider("Price Range", min_price, max_price, (min_price, max_price), step=1, key="price_slider") if min_price != max_price else (min_price, max_price)
-            filtered_df = filtered_df[(filtered_df["price"] >= price_range[0]) & (filtered_df["price"] <= price_range[1])]
+            filtered_df = filtered_df[(filtered_df["price_numeric"] >= price_range[0]) & (filtered_df["price_numeric"] <= price_range[1])]
             # Distance filter
-            min_dist, max_dist = int(filtered_df["distance"].min()), int(filtered_df["distance"].max()) if not filtered_df.empty else (0, 0)
+            min_dist, max_dist = int(filtered_df["distance_numeric"].min()), int(filtered_df["distance_numeric"].max()) if not filtered_df.empty else (0, 0)
             dist_range = st.slider("Distance Range (km)", min_dist, max_dist, (min_dist, max_dist), step=1, key="dist_slider") if min_dist != max_dist else (min_dist, max_dist)
-            filtered_df = filtered_df[(filtered_df["distance"] >= dist_range[0]) & (filtered_df["distance"] <= dist_range[1])]
+            filtered_df = filtered_df[(filtered_df["distance_numeric"] >= dist_range[0]) & (filtered_df["distance_numeric"] <= dist_range[1])]
             # Discount filter
-            min_disc, max_disc = int(filtered_df["discount_pct"].min()), int(filtered_df["discount_pct"].max()) if not filtered_df.empty else (0, 0)
+            min_disc, max_disc = int(filtered_df["discount_numeric"].min()), int(filtered_df["discount_numeric"].max()) if not filtered_df.empty else (0, 0)
             disc_range = st.slider("Discount % Range", min_disc, max_disc, (min_disc, max_disc), step=1, key="disc_slider") if min_disc != max_disc else (min_disc, max_disc)
-            filtered_df = filtered_df[(filtered_df["discount_pct"] >= disc_range[0]) & (filtered_df["discount_pct"] <= disc_range[1])]
-            # Reviews filter
-            min_rev, max_rev = int(filtered_df["reviews"].min()), int(filtered_df["reviews"].max()) if not filtered_df.empty else (0, 0)
-            rev_range = st.slider("Reviews Range", min_rev, max_rev, (min_rev, max_rev), step=1, key="rev_slider") if min_rev != max_rev else (min_rev, max_rev)
-            filtered_df = filtered_df[(filtered_df["reviews"] >= rev_range[0]) & (filtered_df["reviews"] <= rev_range[1])]
+            filtered_df = filtered_df[(filtered_df["discount_numeric"] >= disc_range[0]) & (filtered_df["discount_numeric"] <= disc_range[1])]
+            # Rating filter
+            if "rating_value" in filtered_df.columns:
+                filtered_df["rating_numeric"] = filtered_df["rating_value"]
+            else:
+                filtered_df["rating_numeric"] = 0.0
+            min_rating, max_rating = float(filtered_df["rating_numeric"].min()), float(filtered_df["rating_numeric"].max()) if not filtered_df.empty else (0.0, 5.0)
+            rating_range = st.slider("Rating Range", min_rating, max_rating, (min_rating, max_rating), step=0.1, key="rating_slider") if min_rating != max_rating else (min_rating, max_rating)
+            filtered_df = filtered_df[(filtered_df["rating_numeric"] >= rating_range[0]) & (filtered_df["rating_numeric"] <= rating_range[1])]
+            
+            st.divider()  # Visual separator between filters and sort
+
+            # Initialize session state for sorting
+            if 'sort_by' not in st.session_state:
+                st.session_state.sort_by = 'price'
+            if 'sort_asc' not in st.session_state:
+                st.session_state.sort_asc = True
+            
+            # Sorting controls with clickable column headers (only sortable columns)
+            st.write("### 📊 Sort Options")
+            
+            # Create clickable column header buttons for sortable columns only
+            sort_cols = st.columns(4)
+            col_names = ["distance", "price", "discount", "rating"]
+            col_labels = ["📍 Distance", "💰 Price", "💸 Discount", "⭐ Rating"]
+            
+            for idx, (col_name, col_label) in enumerate(zip(col_names, col_labels)):
+                with sort_cols[idx]:
+                    # Show arrow indicator if this column is currently sorted
+                    if st.session_state.sort_by == col_name:
+                        arrow = " ⬆️" if st.session_state.sort_asc else " ⬇️"
+                        label = f"**{col_label}{arrow}**"
+                    else:
+                        label = col_label
+                    
+                    if st.button(label, key=f"sort_{col_name}", use_container_width=True):
+                        # Toggle sort direction if same column, otherwise set to ascending
+                        if st.session_state.sort_by == col_name:
+                            st.session_state.sort_asc = not st.session_state.sort_asc
+                        else:
+                            st.session_state.sort_by = col_name
+                            st.session_state.sort_asc = True
+                        st.rerun()  # Force immediate rerun to update sorting
+            
+            # Apply sorting based on session state
+            # Map display columns to numeric columns for sorting
+            sort_col_map = {
+                "distance": "distance_numeric",
+                "rating": "rating_numeric",
+                "reviews": "reviews_numeric",
+                "price": "price_numeric",
+                "discount": "discount_numeric",
+                "retail price": "retail_price_numeric"
+            }
+            actual_sort_col = sort_col_map.get(st.session_state.sort_by, st.session_state.sort_by)
+            filtered_df = filtered_df.sort_values(by=actual_sort_col, ascending=st.session_state.sort_asc)
 
             # Create a professional-looking table with custom styling
             st.write("### Your Matched Hotels")
-            st.write("(Click 🔗 to book)")
-            # Add custom CSS for a black table background with white text
+            st.write(f"Sorted by: **{st.session_state.sort_by}** {'⬆️ Ascending' if st.session_state.sort_asc else '⬇️ Descending'}")
+            # Drop the temporary columns before display
+            cols_to_drop = ["brand_key", "price_numeric", "distance_numeric", "discount_numeric", "reviews_numeric", "retail_price_numeric", "rating_numeric"]
+            # Also drop rating_value if it exists
+            if "rating_value" in filtered_df.columns:
+                cols_to_drop.append("rating_value")
+            display_df = filtered_df.drop(columns=cols_to_drop)
+            
+            # Add custom CSS for a black table background with white text, frozen header and first column
             st.markdown("""
             <style>
+            .table-wrapper {
+                max-height: 600px;
+                overflow: auto;
+                position: relative;
+                border: 1px solid #444;
+                border-radius: 8px;
+            }
             .hotel-table {
                 border-collapse: collapse;
                 width: 100%;
                 font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-                border-radius: 8px;
-                overflow: hidden;
-                margin-bottom: 24px;
                 background: #111;
+                margin: 0;
             }
             .hotel-table thead {
                 background: #222;
@@ -267,6 +360,21 @@ if req_id:
                 letter-spacing: 0.5px;
                 color: #fff;
                 background: #222;
+                position: sticky;
+                top: 0;
+                z-index: 10;
+            }
+            /* Freeze first column (name) */
+            .hotel-table th:first-child,
+            .hotel-table td:first-child {
+                position: sticky;
+                left: 0;
+                z-index: 5;
+                background: #111;
+            }
+            .hotel-table th:first-child {
+                z-index: 15;
+                background: #222;
             }
             .hotel-table td {
                 padding: 12px 15px;
@@ -274,6 +382,7 @@ if req_id:
                 vertical-align: middle;
                 color: #fff;
                 background-color: #111;
+                white-space: nowrap;
             }
             .hotel-table tr:last-child td {
                 border-bottom: none;
@@ -295,23 +404,25 @@ if req_id:
                 box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
             }
             /* Add specific styling for important columns */
-            .hotel-table td:nth-child(2) {
-                font-weight: 600; /* Hotel name */
+            .hotel-table td:first-child {
+                font-weight: 600; /* Hotel name - first column */
+                min-width: 200px;
             }
-            .hotel-table td:nth-child(6) {
+            .hotel-table td:nth-child(4) {
                 font-weight: 700;
                 color: #47ffb2; /* Price in green (bright for dark bg) */
             }
-            .hotel-table td:nth-child(7) {
+            .hotel-table td:nth-child(5) {
                 font-weight: 600;
                 color: #ff6b6b; /* Discount in red (bright for dark bg) */
             }
             </style>
             """, unsafe_allow_html=True)
-            # Convert DataFrame to HTML with custom class
-            html_table = filtered_df.to_html(escape=False, index=False, classes='hotel-table')
-            # Display the styled table
-            st.markdown(html_table, unsafe_allow_html=True)
+            # Convert DataFrame to HTML with custom class and wrap in scrollable div
+            # Use escape=False to properly render HTML links and emojis
+            html_table = display_df.to_html(escape=False, index=False, classes='hotel-table')
+            # Display the styled table wrapped in a scrollable container
+            st.markdown(f'<div class="table-wrapper">{html_table}</div>', unsafe_allow_html=True)
         else:
             st.info("No results found for your request yet. Please check back soon.")
     except Exception as e:
@@ -345,13 +456,6 @@ if req_id:
             event_ok = False
             event_msg = f"Webhook error: {e}"
 
-    # Acknowledge
-    st.sidebar.success(f"Saved! Your request ID is `{request_id}`.")
-    st.sidebar.info("Your hotel request has been submitted. Our automated system will search for the best rates and send you an email within the next hour.")
-    if event_ok and event_msg != "No webhook configured.":
-        st.sidebar.info(event_msg)
-    elif not event_ok:
-        st.sidebar.warning(f"Event trigger failed: {event_msg}")
 
     # with st.sidebar.expander("Submitted payload (sanitized)"):
     #     st.json({
