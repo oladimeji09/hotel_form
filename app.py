@@ -403,6 +403,10 @@ if req_id:
             # Map currency code to symbol
             currency_map = {"USD": "$", "EUR": "€", "GBP": "£", "CAD": "$", "AUD": "$", "JPY": "¥", "CNY": "¥", "INR": "₹"}
 
+            # Store numeric price values BEFORE adding currency symbols
+            df["price_numeric"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
+            df["retail_price_numeric"] = pd.to_numeric(df["retail_price"], errors="coerce").fillna(0)
+            
             # Add currency symbol to price and retail_price columns
             df["price"] = df.apply(lambda row: f"{currency_map.get(str(row['currency']), '')}{row['price']}" if pd.notna(row['price']) else "", axis=1)
             df["retail_price"] = df.apply(lambda row: f"{currency_map.get(str(row['currency']), '')}{row['retail_price']}" if pd.notna(row['retail_price']) else "", axis=1)
@@ -416,8 +420,9 @@ if req_id:
                 if col not in df.columns:
                     df[col] = "" if col not in ["price", "discount_pct", "retail_price", "distance", "reviews", "rating_float"] else 0
 
-            # Select only the columns we want
-            df = df[show_cols]
+            # Keep numeric columns for filtering/sorting, along with the display columns
+            keep_cols = show_cols + ["price_numeric", "retail_price_numeric"]
+            df = df[keep_cols]
             
             # Add icons for hotel_brand and booking_url BEFORE renaming
             brand_icons = {
@@ -468,12 +473,10 @@ if req_id:
             df["rating"] = df["rating_float"].apply(rating_to_stars)
             
             # Store numeric versions BEFORE renaming columns
-            df["price_numeric"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
             # Parse distance: extract numeric value from strings like "0.5 miles" or "1.2 km"
             df["distance_numeric"] = df["distance"].apply(lambda x: float(str(x).split()[0]) if isinstance(x, str) and str(x).split()[0].replace('.','',1).isdigit() else 0)
             df["discount_numeric"] = pd.to_numeric(df["discount_pct"], errors="coerce").fillna(0)
             df["reviews_numeric"] = pd.to_numeric(df["reviews"], errors="coerce").fillna(0)
-            df["retail_price_numeric"] = pd.to_numeric(df["retail_price"], errors="coerce").fillna(0)
             
             # Add % sign to discount values
             df["discount_pct"] = df["discount_pct"].apply(lambda x: f"{x}%" if pd.notna(x) and x != 0 else "0%")
@@ -504,23 +507,19 @@ if req_id:
             # Apply brand filter first
             filtered_df = df[df["hotel brand"].isin(selected_brands)].copy()
             
-            # Second row: Distance Range (Miles) | Rating Range (with gap spacing)
+            # Second row: Distance Range (Miles) | Price Range (with gap spacing)
             row2_col1, row2_gap, row2_col2 = st.columns([1, 0.1, 1])
             with row2_col1:
                 min_dist, max_dist = int(filtered_df["distance_numeric"].min()), int(filtered_df["distance_numeric"].max()) if not filtered_df.empty else (0, 0)
                 dist_range = st.slider("Distance Range (Miles)", min_dist, max_dist, (min_dist, max_dist), step=1, key="dist_slider") if min_dist != max_dist else (min_dist, max_dist)
             with row2_col2:
-                if "rating_value" in filtered_df.columns:
-                    filtered_df["rating_numeric"] = filtered_df["rating_value"]
-                else:
-                    filtered_df["rating_numeric"] = 0.0
-                min_rating, max_rating = float(filtered_df["rating_numeric"].min()), float(filtered_df["rating_numeric"].max()) if not filtered_df.empty else (0.0, 5.0)
-                rating_range = st.slider("Rating Range", min_rating, max_rating, (min_rating, max_rating), step=0.1, key="rating_slider") if min_rating != max_rating else (min_rating, max_rating)
+                min_price, max_price = int(filtered_df["price_numeric"].min()), int(filtered_df["price_numeric"].max()) if not filtered_df.empty else (0, 0)
+                price_range = st.slider("Price Range", min_price, max_price, (min_price, max_price), step=1, key="price_slider") if min_price != max_price else (min_price, max_price)
             
             # Apply all filters
             filtered_df = filtered_df[(filtered_df["discount_numeric"] >= disc_range[0]) & (filtered_df["discount_numeric"] <= disc_range[1])]
             filtered_df = filtered_df[(filtered_df["distance_numeric"] >= dist_range[0]) & (filtered_df["distance_numeric"] <= dist_range[1])]
-            filtered_df = filtered_df[(filtered_df["rating_numeric"] >= rating_range[0]) & (filtered_df["rating_numeric"] <= rating_range[1])]
+            filtered_df = filtered_df[(filtered_df["price_numeric"] >= price_range[0]) & (filtered_df["price_numeric"] <= price_range[1])]
             
             st.divider()  # Visual separator between filters and sort
 
@@ -595,7 +594,7 @@ if req_id:
             st.write("### Your Matched Hotels")
             st.write(f"Sorted by: **{st.session_state.sort_by}** {'⬆️ Ascending' if st.session_state.sort_asc else '⬇️ Descending'}")
             # Drop the temporary columns before display
-            cols_to_drop = ["brand_key", "price_numeric", "distance_numeric", "discount_numeric", "reviews_numeric", "retail_price_numeric", "rating_numeric"]
+            cols_to_drop = ["brand_key", "price_numeric", "distance_numeric", "discount_numeric", "reviews_numeric", "retail_price_numeric"]
             # Also drop rating_value if it exists
             if "rating_value" in filtered_df.columns:
                 cols_to_drop.append("rating_value")
